@@ -4,8 +4,7 @@ Lightweight Web Server for your application needs.
 Turn anything into a web server fast.
 
 - [Documentation](http://cesanta.com/docs.shtml) - configuration options and API reference
-- [Examples](https://github.com/cesanta/mongoose/examples) - example programs
-for various use cases
+- [Examples](https://github.com/cesanta/mongoose/tree/master/examples) - example programs for various use cases
 
 Check out Fossa - our [embedded multi-protocol library](https://github.com/cesanta/fossa) with TCP,UDP,HTTP,Websocket,MQTT,DNS support, designed for Internet Of Things!
 
