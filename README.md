@@ -24,14 +24,22 @@ and many other platforms
 
 Note: Meerkat does NOT support HTTPS, CGI, SSI, Websocket. So we advice to consider using [Mongoose Library](https://github.com/cesanta/mongoose) if you require this functionality.
 
+# Contributions
+
+People who have agreed to the
+[Cesanta CLA](http://cesanta.com/contributors_la.html)
+can make contributions. Note that the CLA isn't a copyright
+_assigment_ but rather a copyright _license_.
+You retain the copyright on your contributions.
+
 # Licensing
 
 Meerkat is released under commercial and
 [GNU GPL v.2](http://www.gnu.org/licenses/old-licenses/gpl-2.0.html) open
 source licenses. The GPLv2 open source License does not generally permit
-incorporating this software into non-open source programs. 
+incorporating this software into non-open source programs.
 For those customers who do not wish to comply with the GPLv2 open
 source license requirements,
-[Cesanta Software](http://cesanta.com) offers a full,
+[Cesanta](http://cesanta.com) offers a full,
 royalty-free commercial license and professional support
 without any of the GPL restrictions.
