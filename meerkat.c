@@ -44,7 +44,9 @@
 #undef _UNICODE                 // Use multibyte encoding on Windows
 #define _MBCS                   // Use multibyte encoding on Windows
 #define _INTEGRAL_MAX_BITS 64   // Enable _stati64() on Windows
+#ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS // Disable deprecation warning in VS2005+
+#endif
 #undef WIN32_LEAN_AND_MEAN      // Let windows.h always include winsock2.h
 #ifdef __Linux__
 #define _XOPEN_SOURCE 600       // For flockfile() on Linux
@@ -59,6 +61,14 @@
 #ifdef _MSC_VER
 #pragma warning (disable : 4127)  // FD_SET() emits warning, disable it
 #pragma warning (disable : 4204)  // missing c99 support
+#endif
+
+#ifndef MONGOOSE_ENABLE_THREADS
+#define NS_DISABLE_THREADS
+#endif
+
+#ifdef __OS2__
+#define _MMAP_DECLARED          // Prevent dummy mmap() declaration in stdio.h
 #endif
 
 #include <sys/types.h>
@@ -551,8 +561,6 @@ static int ns_resolve2(const char *host, struct in_addr *ina) {
   int rv = 0;
   struct addrinfo hints, *servinfo, *p;
   struct sockaddr_in *h = NULL;
-  char *ip = NS_MALLOC(17);
-  memset(ip, '\0', 17);
 
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_INET;
@@ -1121,7 +1129,7 @@ typedef struct stat file_stat_t;
 typedef pid_t process_id_t;
 #endif                  //////// End of platform-specific defines and includes
 
-#include "mongoose.h"
+#include "meerkat.h"
 
 #define MAX_REQUEST_SIZE 16384
 #define IOBUF_SIZE 8192
@@ -1818,7 +1826,8 @@ int mg_url_decode(const char *src, size_t src_len, char *dst,
 static int is_valid_http_method(const char *s) {
   return !strcmp(s, "GET") || !strcmp(s, "POST") || !strcmp(s, "HEAD") ||
     !strcmp(s, "CONNECT") || !strcmp(s, "PUT") || !strcmp(s, "DELETE") ||
-    !strcmp(s, "OPTIONS") || !strcmp(s, "PROPFIND") || !strcmp(s, "MKCOL");
+    !strcmp(s, "OPTIONS") || !strcmp(s, "PROPFIND") || !strcmp(s, "MKCOL") ||
+    !strcmp(s, "PATCH");
 }
 
 // Parse HTTP request, fill in mg_request structure.
@@ -2316,7 +2325,7 @@ static void open_file_endpoint(struct connection *conn, const char *path,
                                file_stat_t *st, const char *extra_headers) {
   char date[64], lm[64], etag[64], range[64], headers[1000];
   const char *msg = "OK", *hdr;
-  time_t curtime = time(NULL);
+  time_t t, curtime = time(NULL);
   int64_t r1, r2;
   struct vec mime_vec;
   int n;
@@ -2346,7 +2355,8 @@ static void open_file_endpoint(struct connection *conn, const char *path,
   // Prepare Etag, Date, Last-Modified headers. Must be in UTC, according to
   // http://www.w3.org/Protocols/rfc2616/rfc2616-sec3.html#sec3.3
   gmt_time_string(date, sizeof(date), &curtime);
-  gmt_time_string(lm, sizeof(lm), &st->st_mtime);
+  t = st->st_mtime; // store in local variable for NDK compile
+  gmt_time_string(lm, sizeof(lm), &t);
   construct_etag(etag, sizeof(etag), st);
 
   n = mg_snprintf(headers, sizeof(headers),
@@ -2545,6 +2555,7 @@ static void print_dir_entry(const struct dir_entry *de) {
   int64_t fsize = de->st.st_size;
   int is_dir = S_ISDIR(de->st.st_mode);
   const char *slash = is_dir ? "/" : "";
+  time_t t;
 
   if (is_dir) {
     mg_snprintf(size, sizeof(size), "%s", "[DIRECTORY]");
@@ -2561,7 +2572,8 @@ static void print_dir_entry(const struct dir_entry *de) {
       mg_snprintf(size, sizeof(size), "%.1fG", (double) fsize / 1073741824);
     }
   }
-  strftime(mod, sizeof(mod), "%d-%b-%Y %H:%M", localtime(&de->st.st_mtime));
+  t = de->st.st_mtime;  // store in local variable for NDK compile
+  strftime(mod, sizeof(mod), "%d-%b-%Y %H:%M", localtime(&t));
   mg_url_encode(de->file_name, strlen(de->file_name), href, sizeof(href));
   mg_printf_data(&de->conn->mg_conn,
                   "<tr><td><a href=\"%s%s\">%s%s</a></td>"
@@ -2642,6 +2654,7 @@ void mg_send_digest_auth_request(struct mg_connection *c) {
   c->status_code = 401;
   mg_printf(c,
             "HTTP/1.1 401 Unauthorized\r\n"
+            "Content-Length: 0\r\n"
             "WWW-Authenticate: Digest qop=\"auth\", "
             "realm=\"%s\", nonce=\"%lu\"\r\n\r\n",
             conn->server->config_options[AUTH_DOMAIN],
@@ -3267,6 +3280,10 @@ static void try_parse(struct connection *conn) {
     // iobuf could be reallocated, and pointers in parsed request could
     // become invalid.
     conn->request = (char *) NS_MALLOC(conn->request_len);
+    if (conn->request == NULL) {
+      conn->ns_conn->flags |= NSF_CLOSE_IMMEDIATELY;
+      return;
+    }
     memcpy(conn->request, io->buf, conn->request_len);
     //DBG(("%p [%.*s]", conn, conn->request_len, conn->request));
     iobuf_remove(io, conn->request_len);
@@ -3652,6 +3669,7 @@ void mg_copy_listeners(struct mg_server *s, struct mg_server *to) {
     if ((c->flags & NSF_LISTENING) &&
         (tmp = (struct ns_connection *) NS_MALLOC(sizeof(*tmp))) != NULL) {
       memcpy(tmp, c, sizeof(*tmp));
+
       tmp->mgr = &to->ns_mgr;
       ns_add_conn(tmp->mgr, tmp);
     }
@@ -3710,6 +3728,7 @@ const char *mg_set_option(struct mg_server *server, const char *name,
     char buf[500] = "";
     size_t n = 0;
     struct vec vec;
+
     /*
      * Ports can be specified as 0, meaning that OS has to choose any
      * free port that is available. In order to pass chosen port number to
